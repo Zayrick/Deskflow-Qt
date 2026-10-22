@@ -8,11 +8,13 @@
 #pragma once
 
 #include "OSXAutoTypes.h"
+#include "OSXCapsLockSwitch.h"
 #include "deskflow/KeyState.h"
 
 #include <Carbon/Carbon.h>
 
 #include <map>
+#include <optional>
 #include <vector>
 
 class IOSXKeyResource;
@@ -78,6 +80,10 @@ public:
   //@}
 
   // IKeyState overrides
+  void fakeKeyDown(KeyID id, KeyModifierMask mask, KeyButton button, const std::string &lang) override;
+  bool fakeKeyRepeat(KeyID id, KeyModifierMask mask, int32_t count, KeyButton button, const std::string &lang) override;
+  bool fakeKeyUp(KeyButton button) override;
+  void fakeAllKeysUp() override;
   bool fakeCtrlAltDel() override;
   bool fakeMediaKey(KeyID id) override;
   KeyModifierMask pollActiveModifiers() const override;
@@ -105,6 +111,10 @@ private:
 
   // Change active keyboard group to group
   void setGroup(int32_t group);
+
+  // When Caps Lock switches input sources the server's Caps Lock state no
+  // longer matches ours, so make \p id and \p mask agree with the local state
+  KeyID matchLocalCapsLock(KeyID id, KeyModifierMask &mask);
 
   // Send an event for the given modifier key
   void handleModifierKey(void *target, uint32_t virtualKey, KeyID id, bool down, KeyModifierMask newMask);
@@ -168,4 +178,8 @@ private:
   bool m_controlRightPressed;
   bool m_altRightPressed;
   bool m_superRightPressed;
+
+  OSXCapsLockSwitch m_capsLockSwitch;
+  // server button of a Caps Lock press handled by m_capsLockSwitch
+  std::optional<KeyButton> m_capsLockSwitchButton;
 };

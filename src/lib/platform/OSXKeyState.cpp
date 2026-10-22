@@ -57,6 +57,7 @@ static const KeyEntry s_controlKeys[] = {
     {kKeyEnd, kVK_End},
     {kKeyPageUp, kVK_PageUp},
     {kKeyPageDown, kVK_PageDown},
+    {kKeyHelp, kVK_Help},
     {kKeyInsert, kVK_Help}, // Mac Keyboards have 'Help' on 'Insert'
 
     // function keys
@@ -72,8 +73,13 @@ static const KeyEntry s_controlKeys[] = {
     {kKeyF10, kVK_F10},
     {kKeyF11, kVK_F11},
     {kKeyF12, kVK_F12},
+    // full size Apple keyboards have F13 to F15 where PC keyboards have
+    // Print Screen, Scroll Lock and Pause/Break, and macOS treats them the same
+    {kKeyPrint, kVK_F13},
     {kKeyF13, kVK_F13},
     {kKeyF14, kVK_F14},
+    {kKeyPause, kVK_F15},
+    {kKeyBreak, kVK_F15},
     {kKeyF15, kVK_F15},
     {kKeyF16, kVK_F16},
     {kKeyF17, kVK_F17},
@@ -130,7 +136,10 @@ static const KeyEntry s_controlKeys[] = {
     {kKeyMissionControl, s_missionControlVK},
     {kKeyLaunchpad, s_launchpadVK},
     {kKeyBrightnessUp, s_brightnessUp},
-    {kKeyBrightnessDown, s_brightnessDown}
+    {kKeyBrightnessDown, s_brightnessDown},
+
+    // the PC application (context menu) key
+    {kKeyMenu, kVK_ContextualMenu}
 };
 
 namespace {
@@ -399,6 +408,112 @@ KeyButton OSXKeyState::mapKeyFromEvent(KeyIDs &ids, KeyModifierMask *maskOut, CG
   }
 
   return 0;
+}
+
+namespace {
+
+// Returns the other case of a single letter, or id itself if it has none
+KeyID swapLetterCase(KeyID id)
+{
+  // surrogates and deskflow's own key ids aren't letters
+  if (id == 0 || id >= 0xD800) {
+    return id;
+  }
+  const auto c = static_cast<UniChar>(id);
+  auto convert = [c](bool upper) {
+    CFMutableStringRef string = CFStringCreateMutable(nullptr, 0);
+    CFStringAppendCharacters(string, &c, 1);
+    if (upper) {
+      CFStringUppercase(string, nullptr);
+    } else {
+      CFStringLowercase(string, nullptr);
+    }
+    // letters like U+00DF whose other case is several characters are left alone
+    const UniChar other = CFStringGetLength(string) == 1 ? CFStringGetCharacterAtIndex(string, 0) : c;
+    CFRelease(string);
+    return other;
+  };
+  UniChar other = convert(true);
+  if (other == c) {
+    other = convert(false);
+  }
+  return other;
+}
+
+} // namespace
+
+void OSXKeyState::fakeKeyDown(KeyID id, KeyModifierMask mask, KeyButton button, const std::string &lang)
+{
+  if (!OSXCapsLockSwitch::isEnabled()) {
+    KeyState::fakeKeyDown(id, mask, button, lang);
+    return;
+  }
+
+  if (id == kKeyCapsLock) {
+    const auto serverButton = static_cast<KeyButton>(button & (IKeyState::s_numButtons - 1));
+    if (m_capsLockSwitchButton != serverButton) {
+      // not an auto-repeated press
+      m_capsLockSwitchButton = serverButton;
+      m_capsLockSwitch.press();
+    }
+    return;
+  }
+
+  id = matchLocalCapsLock(id, mask);
+  KeyState::fakeKeyDown(id, mask, button, lang);
+}
+
+bool OSXKeyState::fakeKeyRepeat(
+    KeyID id, KeyModifierMask mask, int32_t count, KeyButton button, const std::string &lang
+)
+{
+  if (OSXCapsLockSwitch::isEnabled()) {
+    if (id == kKeyCapsLock) {
+      return false;
+    }
+    id = matchLocalCapsLock(id, mask);
+  }
+  return KeyState::fakeKeyRepeat(id, mask, count, button, lang);
+}
+
+bool OSXKeyState::fakeKeyUp(KeyButton button)
+{
+  if (m_capsLockSwitchButton == static_cast<KeyButton>(button & (IKeyState::s_numButtons - 1))) {
+    m_capsLockSwitchButton.reset();
+    m_capsLockSwitch.release();
+    return true;
+  }
+  return KeyState::fakeKeyUp(button);
+}
+
+void OSXKeyState::fakeAllKeysUp()
+{
+  m_capsLockSwitchButton.reset();
+  m_capsLockSwitch.cancel();
+  KeyState::fakeAllKeysUp();
+}
+
+KeyID OSXKeyState::matchLocalCapsLock(KeyID id, KeyModifierMask &mask)
+{
+  // The server reports the case its own Caps Lock produced, while the key map
+  // types with our Caps Lock, so turn the letter into what the server would
+  // have sent with our Caps Lock state.
+  const bool localOn = OSXCapsLockSwitch::isCapsLockOn();
+  const bool serverOn = (mask & KeyModifierCapsLock) != 0;
+  if (localOn != serverOn) {
+    id = swapLetterCase(id);
+  }
+
+  // Caps Lock changes behind KeyState's back here, so refresh what it knows
+  KeyModifierMask &active = getActiveModifiersRValue();
+  if (localOn) {
+    mask |= KeyModifierCapsLock;
+    active |= KeyModifierCapsLock;
+  } else {
+    mask &= ~KeyModifierCapsLock;
+    active &= ~KeyModifierCapsLock;
+  }
+  return id;
 }
 
 bool OSXKeyState::fakeCtrlAltDel()

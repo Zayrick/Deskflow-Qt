@@ -74,6 +74,8 @@ elseif(APPLE)
     IOSXKeyResource.cpp
     IOSXKeyResource.h
     OSXAutoTypes.h
+    OSXCapsLockSwitch.cpp
+    OSXCapsLockSwitch.h
     OSXClipboard.cpp
     OSXClipboard.h
     OSXClipboardAnyBitmapConverter.cpp
