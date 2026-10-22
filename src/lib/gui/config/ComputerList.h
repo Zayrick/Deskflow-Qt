@@ -1,5 +1,6 @@
 /*
  * Deskflow -- mouse and keyboard sharing utility
+ * SPDX-FileCopyrightText: (C) 2026 Deskflow Developers
  * SPDX-FileCopyrightText: (C) 2021 Synergy App Ltd
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
  */
@@ -8,35 +9,44 @@
 
 #include "Computer.h"
 
+#include <QRectF>
+
+/**
+ * @brief The computers placed on the server's layout canvas.
+ *
+ * Only real computers are stored; their geometry (Computer::rect) decides which edges are linked.
+ */
 class ComputerList : public QList<Computer>
 {
-  int m_width = 5;
-
 public:
-  explicit ComputerList(int width = 5);
+  ComputerList() = default;
 
   /**
-   * @brief addComputerByPriority adds a new computer according to the following
-   * priority: 1.left side of the server 2.right side of the server 3.top 4.down
-   * 5.top left-hand diagonally
-   * 6.top right-hand diagonally
-   * 7.bottom right-hand diagonally
-   * 8.bottom left-hand diagonally
-   * 9.In case all places from the list have already booked, place in any spare
-   * place
-   * @param newComputer
+   * @brief appendToRight places a new computer to the right of the right most computer, top aligned with it so the
+   * two share an edge, and appends it to the list. The first computer is placed at the origin.
+   * @return the index of the appended computer
    */
-  void addComputerByPriority(const Computer &newComputer);
+  qsizetype appendToRight(Computer newComputer);
+
+  /// @return index of the computer named @p name or -1
+  [[nodiscard]] qsizetype indexOfName(const QString &name) const;
+
+  /// @return index of the server computer or -1
+  [[nodiscard]] qsizetype serverIndex() const;
+
+  /// @return true if @p rect overlaps (not just touches) any computer other than the one at @p ignoreIndex
+  [[nodiscard]] bool overlapsAny(const QRectF &rect, qsizetype ignoreIndex = -1) const;
+
+  /// @return bounding rectangle of all computers on the canvas
+  [[nodiscard]] QRectF boundingRect() const;
 
   /**
-   * @brief addComputerToFirstEmpty adds computer into the first empty place
-   * @param newComputer
+   * @brief resolveOverlap moves the computer at @p index by the smallest distance that makes it stop overlapping the
+   * others, keeping it flush against the computer it was pushed away from.
+   * @return false if no such position was found, the computer is left untouched in that case
    */
-  void addComputerToFirstEmpty(const Computer &newComputer);
+  bool resolveOverlap(qsizetype index);
 
-  /**
-   * @brief Returns true if computers are equal
-   * @param sc
-   */
-  bool operator==(const ComputerList &sc) const;
+  /// Overlap smaller than this (in canvas units) is treated as touching.
+  static constexpr double kTouchTolerance = 1.0;
 };

@@ -11,28 +11,17 @@
 #include "common/Hotkey.h"
 #include "common/Settings.h"
 
+#include "ComputerLinks.h"
+
 #include <QAbstractButton>
 #include <QPushButton>
+
+#include <algorithm>
 
 using enum ComputerConfig::SwitchCorner;
 using enum ComputerConfig::Fix;
 
-static const struct
-{
-  int x;
-  int y;
-  const char *name;
-} neighbourDirs[] = {
-    {1, 0, "right"},
-    {-1, 0, "left"},
-    {0, -1, "up"},
-    {0, 1, "down"},
-
-};
-
-const int serverDefaultIndex = 7;
-
-ServerConfig::ServerConfig(int columns, int rows) : m_computers(columns), m_columns(columns), m_rows(rows)
+ServerConfig::ServerConfig()
 {
   recall();
 }
@@ -61,17 +50,6 @@ void ServerConfig::save(QFile &file) const
   outStream << *this;
 }
 
-void ServerConfig::setupComputers()
-{
-  computers().clear();
-  hotkeys().clear();
-
-  // There must always be computer objects for each cell in the computers QList.
-  // Unused computers are identified by having an empty name.
-  for (int i = 0; i < m_columns * m_rows; i++)
-    addComputer(Computer());
-}
-
 void ServerConfig::commit()
 {
   qDebug("committing server config");
@@ -80,9 +58,11 @@ void ServerConfig::commit()
   settings().remove("");
 
   settings().beginWriteArray("screens");
-  for (int i = 0; i < computers().size(); i++) {
-    settings().setArrayIndex(i);
-    const auto &computer = computers()[i];
+  int index = 0;
+  for (const auto &computer : std::as_const(computers())) {
+    if (computer.isNull())
+      continue;
+    settings().setArrayIndex(index++);
     computer.saveSettings(settings());
     auto computerName = Settings::value(Settings::Core::ComputerName).toString();
     if (computer.isServer() && computerName != computer.name()) {
@@ -107,21 +87,28 @@ void ServerConfig::recall()
 
   settings().beginGroup("internalConfig");
 
-  m_columns = Settings::value(Settings::Server::GridWidth).toInt();
-  m_rows = Settings::value(Settings::Server::GridHeight).toInt();
+  computers().clear();
+  hotkeys().clear();
 
-  // we need to know the number of columns and rows before we can set up
-  // ourselves
-  setupComputers();
+  // Configs written before the free layout stored a fixed grid of cells, empty cells included. Their position in the
+  // array is turned into canvas coordinates so the old neighbours stay neighbours.
+  const int gridWidth = std::max(1, Settings::value(Settings::Server::GridWidth).toInt());
+  const auto cellSize = Computer::kDefaultResolution;
 
   int numComputers = settings().beginReadArray("screens");
-  Q_ASSERT(numComputers <= computers().size());
   for (int i = 0; i < numComputers; i++) {
     settings().setArrayIndex(i);
-    computers()[i].loadSettings(settings());
-    if (getServerName() == computers()[i].name()) {
-      computers()[i].markAsServer();
+    Computer computer;
+    computer.loadSettings(settings());
+    if (computer.isNull())
+      continue;
+    if (!Computer::hasGeometry(settings())) {
+      computer.setPosition(QPoint((i % gridWidth) * cellSize.width(), (i / gridWidth) * cellSize.height()));
     }
+    if (getServerName() == computer.name()) {
+      computer.markAsServer();
+    }
+    computers().append(computer);
   }
   settings().endArray();
 
@@ -137,38 +124,19 @@ void ServerConfig::recall()
   settings().endGroup();
 }
 
-int ServerConfig::adjacentComputerIndex(int idx, int deltaColumn, int deltaRow) const
-{
-  if (computers()[idx].isNull())
-    return -1;
-
-  // if we're at the left or right end of the table, don't find results going
-  // further left or right
-  if ((deltaColumn > 0 && (idx + 1) % m_columns == 0) || (deltaColumn < 0 && idx % m_columns == 0))
-    return -1;
-
-  int arrayPos = idx + deltaColumn + deltaRow * m_columns;
-
-  if (arrayPos >= computers().size() || arrayPos < 0)
-    return -1;
-
-  return arrayPos;
-}
-
 QTextStream &operator<<(QTextStream &outStream, const ServerConfig &config)
 {
   outStream << "section: links" << Qt::endl;
 
-  for (int i = 0; const auto &computer : config.computers()) {
-    if (!computer.isNull()) {
-      outStream << "\t" << computer.name() << ":\n";
-      for (const auto &neighbour : std::as_const(neighbourDirs)) {
-        int idx = config.adjacentComputerIndex(i, neighbour.x, neighbour.y);
-        if (idx != -1 && !config.computers()[idx].isNull())
-          outStream << "\t\t" << neighbour.name << " = " << config.computers()[idx].name() << Qt::endl;
-      }
+  const auto links = deskflow::gui::computeLinks(config.computers());
+  for (const auto &computer : config.computers()) {
+    if (computer.isNull())
+      continue;
+    outStream << "\t" << computer.name() << ":\n";
+    for (const auto &link : links) {
+      if (link.source == computer.name())
+        outStream << "\t\t" << link.toString() << Qt::endl;
     }
-    i++;
   }
 
   outStream << "end" << Qt::endl << Qt::endl;
@@ -220,20 +188,6 @@ bool ServerConfig::useExternalConfig() const
   return Settings::value(Settings::Server::ExternalConfig).toBool();
 }
 
-bool ServerConfig::isFull() const
-{
-  bool isFull = true;
-
-  for (const auto &computer : computers()) {
-    if (computer.isNull()) {
-      isFull = false;
-      break;
-    }
-  }
-
-  return isFull;
-}
-
 bool ServerConfig::computerExists(const QString &computerName) const
 {
   bool isExists = false;
@@ -250,16 +204,28 @@ bool ServerConfig::computerExists(const QString &computerName) const
 
 void ServerConfig::addClient(const QString &clientName)
 {
-  int serverIndex = -1;
-  const auto computerName = Settings::value(Settings::Core::ComputerName).toString();
+  ensureServer();
+  if (!computerExists(clientName))
+    m_computers.appendToRight(Computer(clientName));
+}
 
-  if (findComputerName(computerName, serverIndex)) {
-    m_computers[serverIndex].markAsServer();
-  } else {
-    fixNoServer(computerName, serverIndex);
+void ServerConfig::ensureServer(const QSize &desktopSize)
+{
+  const auto serverName = getServerName();
+  auto index = m_computers.indexOfName(serverName);
+  if (index == -1) {
+    Computer server(serverName);
+    if (desktopSize.isValid())
+      server.setResolution(desktopSize);
+    index = m_computers.appendToRight(server);
+  } else if (desktopSize.isValid() && m_computers[index].resolution() != desktopSize) {
+    // Keep the width the server occupies on the canvas so its left and right neighbours stay attached.
+    auto &server = m_computers[index];
+    const auto canvasWidth = server.rect().width();
+    server.setResolution(desktopSize);
+    server.setScale(canvasWidth / desktopSize.width());
   }
-
-  m_computers.addComputerByPriority(Computer(clientName));
+  m_computers[index].markAsServer();
 }
 
 void ServerConfig::setConfigFile(const QString &configFile) const
@@ -270,32 +236,6 @@ void ServerConfig::setConfigFile(const QString &configFile) const
 void ServerConfig::setUseExternalConfig(bool useExternalConfig) const
 {
   Settings::setValue(Settings::Server::ExternalConfig, useExternalConfig);
-}
-
-bool ServerConfig::findComputerName(const QString &name, int &index)
-{
-  bool found = false;
-  for (int i = 0; i < computers().size(); i++) {
-    if (!computers()[i].isNull() && computers()[i].name().compare(name) == 0) {
-      index = i;
-      found = true;
-      break;
-    }
-  }
-  return found;
-}
-
-bool ServerConfig::fixNoServer(const QString &name, int &index)
-{
-  bool fixed = false;
-  if (computers()[serverDefaultIndex].isNull()) {
-    m_computers[serverDefaultIndex].setName(name);
-    m_computers[serverDefaultIndex].markAsServer();
-    index = serverDefaultIndex;
-    fixed = true;
-  }
-
-  return fixed;
 }
 
 QSettingsProxy &ServerConfig::settings()

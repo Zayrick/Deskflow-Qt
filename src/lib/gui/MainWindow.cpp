@@ -778,7 +778,7 @@ void MainWindow::handleUnrecognisedClient(const QString &clientName)
   if (Settings::value(Settings::Server::ExternalConfig).toBool())
     return;
 
-  if (m_serverConfig.isFull() || m_serverConfig.computerExists(clientName))
+  if (m_serverConfig.computerExists(clientName))
     return;
 
   m_newClientPromptShowing = true;

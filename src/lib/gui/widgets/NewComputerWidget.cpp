@@ -7,8 +7,10 @@
  */
 
 #include "NewComputerWidget.h"
-#include "ComputerSetupModel.h"
+#include "ComputerLayoutView.h"
+#include "gui/config/Computer.h"
 
+#include <QDataStream>
 #include <QDrag>
 #include <QLabel>
 #include <QMimeData>
@@ -26,10 +28,10 @@ void NewComputerWidget::mousePressEvent(QMouseEvent *)
 
   QByteArray itemData;
   QDataStream dataStream(&itemData, QIODevice::WriteOnly);
-  dataStream << -1 << -1 << newComputer;
+  dataStream << newComputer;
 
   auto *pMimeData = new QMimeData;
-  pMimeData->setData(ComputerSetupModel::mimeType(), itemData);
+  pMimeData->setData(ComputerLayoutView::mimeType(), itemData);
 
   auto *pDrag = new QDrag(this);
   pDrag->setMimeData(pMimeData);

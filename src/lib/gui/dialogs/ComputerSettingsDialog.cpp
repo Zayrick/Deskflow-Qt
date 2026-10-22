@@ -33,6 +33,13 @@ ComputerSettingsDialog::ComputerSettingsDialog(QWidget *parent, Computer *comput
 
   ui->lineNameEdit->setText(m_computer->name());
 
+  ui->sbWidth->setValue(m_computer->resolution().width());
+  ui->sbHeight->setValue(m_computer->resolution().height());
+  ui->sbScale->setValue(m_computer->scale() * 100.0);
+  // the server's resolution is taken from its displays
+  ui->sbWidth->setEnabled(!m_computer->isServer());
+  ui->sbHeight->setEnabled(!m_computer->isServer());
+
   const auto valNameError = new validators::ValidationError(this, ui->lblNameError);
   const auto valName = new validators::ComputerLineNameValidator(ui->lineNameEdit, valNameError, computers);
   ui->lineNameEdit->setValidator(valName);
@@ -116,6 +123,12 @@ void ComputerSettingsDialog::accept()
   m_computer->setSwitchCorner(BottomLeft, ui->chkDeadBottomLeft->isChecked());
   m_computer->setSwitchCorner(BottomRight, ui->chkDeadBottomRight->isChecked());
   m_computer->setSwitchCornerSize(ui->sbSwitchCornerSize->value());
+
+  if (!m_computer->isServer())
+    m_computer->setResolution(QSize(ui->sbWidth->value(), ui->sbHeight->value()));
+  // the spin box rounds the scale, only apply it when edited so the computer doesn't drift off its neighbours
+  if (qRound(m_computer->scale() * 1000.0) != qRound(ui->sbScale->value() * 10.0))
+    m_computer->setScale(ui->sbScale->value() / 100.0);
 
   m_computer->setFix(CapsLock, ui->chkFixCapsLock->isChecked());
   m_computer->setFix(NumLock, ui->chkFixNumLock->isChecked());

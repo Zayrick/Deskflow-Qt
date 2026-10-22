@@ -10,6 +10,8 @@
 #include "config/ComputerConfig.h"
 #include <common/Settings.h>
 
+#include <algorithm>
+
 using enum KeyboardModifier;
 using enum ComputerConfig::SwitchCorner;
 using enum ComputerConfig::Fix;
@@ -26,6 +28,12 @@ void Computer::loadSettings(QSettingsProxy &settings)
 
   if (name.isEmpty())
     return;
+
+  if (hasGeometry(settings)) {
+    setPosition(QPoint(settings.value(kKeyX).toInt(), settings.value(kKeyY).toInt()));
+    setResolution(QSize(settings.value(kKeyWidth).toInt(), settings.value(kKeyHeight).toInt()));
+    setScale(settings.value(kKeyScale, 1.0).toDouble());
+  }
 
   setModifier(Alt, modifierValueFromString(Settings::value(Settings::Computer::ModifierAlt.arg(name)).toString()));
   setModifier(AltGr, modifierValueFromString(Settings::value(Settings::Computer::ModifierAltGr.arg(name)).toString()));
@@ -60,6 +68,12 @@ void Computer::saveSettings(QSettingsProxy &settings) const
 
   if (computerName.isEmpty())
     return;
+
+  settings.setValue(kKeyX, m_Position.x());
+  settings.setValue(kKeyY, m_Position.y());
+  settings.setValue(kKeyWidth, m_Resolution.width());
+  settings.setValue(kKeyHeight, m_Resolution.height());
+  settings.setValue(kKeyScale, m_Scale);
 
   Settings::setValue(Settings::Computer::Name.arg(computerName), computerName);
   Settings::setValue(Settings::Computer::Aliases.arg(computerName), m_Aliases);
@@ -107,6 +121,21 @@ void Computer::saveSettings(QSettingsProxy &settings) const
   );
 }
 
+bool Computer::hasGeometry(const QSettingsProxy &settings)
+{
+  return settings.contains(kKeyWidth) && settings.contains(kKeyHeight);
+}
+
+void Computer::setResolution(const QSize &resolution)
+{
+  m_Resolution = resolution.isValid() && !resolution.isEmpty() ? resolution : kDefaultResolution;
+}
+
+void Computer::setScale(double scale)
+{
+  m_Scale = (scale > 0.0) ? std::clamp(scale, kMinScale, kMaxScale) : 1.0;
+}
+
 QString Computer::screensSection() const
 {
   return QStringLiteral("\t%1:\n").arg(name());
@@ -116,5 +145,7 @@ bool Computer::operator==(const Computer &computer) const
 {
   return m_Name == computer.m_Name && m_Aliases == computer.m_Aliases && m_Modifiers == computer.m_Modifiers &&
          m_SwitchCorners == computer.m_SwitchCorners && m_SwitchCornerSize == computer.m_SwitchCornerSize &&
-         m_Fixes == computer.m_Fixes && m_Swapped == computer.m_Swapped && m_isServer == computer.m_isServer;
+         m_Fixes == computer.m_Fixes && m_Swapped == computer.m_Swapped && m_isServer == computer.m_isServer &&
+         m_Position == computer.m_Position && m_Resolution == computer.m_Resolution &&
+         qFuzzyCompare(m_Scale, computer.m_Scale);
 }

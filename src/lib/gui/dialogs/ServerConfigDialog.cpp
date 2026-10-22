@@ -16,6 +16,7 @@
 #include "dialogs/ActionDialog.h"
 #include "dialogs/ComputerSettingsDialog.h"
 #include "dialogs/HotkeyDialog.h"
+#include "gui/widgets/ComputerLayoutView.h"
 #include "gui/widgets/SettingsDialogButtonBox.h"
 
 #include <QFileDialog>
@@ -26,23 +27,24 @@ using enum ComputerConfig::SwitchCorner;
 ServerConfigDialog::ServerConfigDialog(QWidget *parent, ServerConfig &config)
     : QDialog(parent, Qt::WindowTitleHint | Qt::WindowSystemMenuHint),
       ui{std::make_unique<Ui::ServerConfigDialog>()},
-      m_columns{Settings::value(Settings::Server::GridWidth).toInt()},
-      m_rows{Settings::value(Settings::Server::GridHeight).toInt()},
       m_originalServerConfig(config),
       m_originalServerConfigIsExternal(config.useExternalConfig()),
       m_originalServerConfigUsesExternalFile(config.configFile()),
       m_serverConfig(config),
-      m_computerSetupModel(m_serverConfig.computers(), m_columns, m_rows),
       m_buttonBox{new SettingsDialogButtonBox(this)}
 {
   ui->setupUi(this);
   ui->tabWidget->setCurrentIndex(0);
   layout()->addWidget(m_buttonBox);
 
+  // the server's size follows this computer's displays; apply it to both copies so it doesn't count as a change
+  const auto desktopSize = ComputerLayoutView::localDesktopSize();
+  m_originalServerConfig.ensureServer(desktopSize);
+  m_serverConfig.ensureServer(desktopSize);
+
   loadFromConfig();
 
   ui->lblRemoveComputer->setPixmap(QIcon::fromTheme("user-trash").pixmap(QSize(64, 64)));
-  ui->lblNewComputer->setEnabled(!model().isFull());
   ui->lblNewComputer->setPixmap(QIcon::fromTheme("video-display").pixmap(QSize(64, 64)));
   ui->btnBrowseConfigFile->setIcon(QIcon::fromTheme(QIcon::ThemeIcon::DocumentOpen));
 
@@ -94,7 +96,7 @@ void ServerConfigDialog::save()
   Settings::setValue(Settings::Server::ExternalConfigFile, ui->lineConfigFile->text());
 
   QStringList computerNames;
-  const auto computerList = m_computerSetupModel.m_computers;
+  const auto &computerList = serverConfig().computers();
   for (const auto &computer : computerList) {
     const auto &computerName = computer.name();
     if (computerName.isEmpty())
@@ -350,12 +352,6 @@ void ServerConfigDialog::addClient()
   addComputer("", false);
 }
 
-void ServerConfigDialog::onComputerRemoved()
-{
-  ui->lblNewComputer->setEnabled(true);
-  setButtonBoxEnabledButtons();
-}
-
 void ServerConfigDialog::toggleExternalConfig(bool checked)
 {
   ui->widgetExternalConfigControls->setEnabled(checked);
@@ -408,20 +404,8 @@ void ServerConfigDialog::loadFromConfig()
   for (const Hotkey &hotkey : std::as_const(serverConfig().hotkeys()))
     ui->listHotkeys->addItem(hotkey.text());
 
-  ui->computerSetupView->setModel(&m_computerSetupModel);
-
-  auto &computers = serverConfig().computers();
-  auto server = std::ranges::find_if(computers, [this](const Computer &computer) {
-    return (computer.name() == serverConfig().getServerName());
-  });
-
-  if (server == computers.end()) {
-    Computer serverComputer(serverConfig().getServerName());
-    serverComputer.markAsServer();
-    model().computer(m_columns / 2, m_rows / 2) = serverComputer;
-  } else {
-    server->markAsServer();
-  }
+  serverConfig().ensureServer(ComputerLayoutView::localDesktopSize());
+  ui->computerLayoutView->setComputers(&serverConfig().computers());
   updateControls();
 }
 
@@ -431,10 +415,7 @@ void ServerConfigDialog::resetFromSettings()
   m_serverConfig.setConfigFile(m_originalServerConfigUsesExternalFile);
   m_serverConfig.setUseExternalConfig(m_originalServerConfigIsExternal);
   loadFromConfig();
-  if (ui->tabWidget->currentWidget() == ui->tabComputers) {
-    ui->computerSetupView->reset();
-    ui->computerSetupView->update();
-  }
+  ui->computerLayoutView->update();
 }
 
 void ServerConfigDialog::refreshControls()
@@ -468,7 +449,6 @@ void ServerConfigDialog::initConnections() const
   connect(m_buttonBox, &SettingsDialogButtonBox::reset, this, &ServerConfigDialog::resetFromSettings);
   connect(m_buttonBox, &SettingsDialogButtonBox::restoreDefault, this, &ServerConfigDialog::restoreFromDefaults);
   connect(ui->tabWidget, &QTabWidget::currentChanged, this, &ServerConfigDialog::setButtonBoxEnabledButtons);
-  connect(ui->lblRemoveComputer, &RemoveComputerWidget::computerRemoved, this, &ServerConfigDialog::onComputerRemoved);
   connect(ui->btnNewHotkey, &QPushButton::clicked, this, &ServerConfigDialog::addHotkey);
   connect(ui->btnEditHotkey, &QPushButton::clicked, this, &ServerConfigDialog::editHotkey);
   connect(ui->btnRemoveHotkey, &QPushButton::clicked, this, &ServerConfigDialog::removeHotkey);
@@ -513,7 +493,7 @@ void ServerConfigDialog::initConnections() const
   );
   connect(ui->cbDisableLockToComputer, &QCheckBox::toggled, this, &ServerConfigDialog::toggleLockToComputer);
   connect(
-      &m_computerSetupModel, &ComputerSetupModel::computersChanged, this,
+      ui->computerLayoutView, &ComputerLayoutView::computersChanged, this,
       &ServerConfigDialog::setButtonBoxEnabledButtons
   );
   connect(Settings::instance(), &Settings::settingsWritableChanged, this, &ServerConfigDialog::updateControls);
@@ -578,13 +558,14 @@ bool ServerConfigDialog::addComputer(const QString &clientName, bool doSilent)
   bool isAccepted = false;
   Computer newComputer(clientName);
 
-  if (ComputerSettingsDialog dlg(this, &newComputer, &model().m_computers);
+  if (ComputerSettingsDialog dlg(this, &newComputer, &serverConfig().computers());
       doSilent || dlg.exec() == QDialog::Accepted) {
-    model().addComputer(newComputer);
+    serverConfig().computers().appendToRight(newComputer);
     isAccepted = true;
+    ui->computerLayoutView->update();
+    setButtonBoxEnabledButtons();
   }
 
-  ui->lblNewComputer->setEnabled(!model().isFull());
   return isAccepted;
 }
 

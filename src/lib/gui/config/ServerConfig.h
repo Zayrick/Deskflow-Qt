@@ -14,6 +14,7 @@
 #include "gui/config/ComputerList.h"
 
 #include <QList>
+#include <QSize>
 
 class QTextStream;
 class QSettings;
@@ -27,7 +28,7 @@ class ServerConfig : public ComputerConfig
   friend QTextStream &operator<<(QTextStream &outStream, const ServerConfig &config);
 
 public:
-  explicit ServerConfig(int columns = kServerGridWidth, int rows = kServerGridHeight);
+  explicit ServerConfig();
   ~ServerConfig() = default;
 
   bool operator==(const ServerConfig &sc) const;
@@ -48,7 +49,6 @@ public:
   bool save(const QString &fileName) const;
   bool computerExists(const QString &computerName) const;
   void save(QFile &file) const;
-  bool isFull() const;
   void commit();
   int numComputers() const;
   QString getServerName() const;
@@ -56,10 +56,11 @@ public:
   QString configFile() const;
   bool useExternalConfig() const;
   void addClient(const QString &clientName);
+  /// Makes sure the server computer is on the layout and sizes it after this computer's desktop.
+  void ensureServer(const QSize &desktopSize = {});
 
 private:
   void recall();
-  void setupComputers();
   QSettingsProxy &settings();
   ComputerList &computers()
   {
@@ -79,16 +80,11 @@ private:
   {
     return m_Hotkeys;
   }
-  int adjacentComputerIndex(int idx, int deltaColumn, int deltaRow) const;
-  bool findComputerName(const QString &name, int &index);
-  bool fixNoServer(const QString &name, int &index);
 
 private:
   HotkeyList m_Hotkeys;
 
   ComputerList m_computers;
-  int m_columns;
-  int m_rows;
 };
 
 QTextStream &operator<<(QTextStream &outStream, const ServerConfig &config);

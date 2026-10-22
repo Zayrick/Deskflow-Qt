@@ -13,6 +13,13 @@ private Q_SLOTS:
   // Test are run in order top to bottom
   void initTestCase();
   void basicFunctionality();
+  void geometryDefaults();
+  void geometrySettings();
+  void legacySettingsHaveNoGeometry();
+  void scaleIsClamped();
+  void invalidResolutionFallsBack();
+  void equalityIncludesGeometry();
+  void dataStreamKeepsGeometry();
 
 private:
   inline static const QString m_settingsPath = QStringLiteral("tmp/test");

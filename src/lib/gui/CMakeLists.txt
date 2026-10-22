@@ -15,8 +15,6 @@ endif()
 
 add_library(${target} STATIC
   ${platform_sources}
-  ComputerSetupModel.cpp
-  ComputerSetupModel.h
   Diagnostic.cpp
   Diagnostic.h
   FileTail.cpp
@@ -36,6 +34,8 @@ add_library(${target} STATIC
   config/ComputerConfig.h
   config/Computer.cpp
   config/Computer.h
+  config/ComputerLinks.cpp
+  config/ComputerLinks.h
   config/ComputerList.cpp
   config/ComputerList.h
   config/ServerConfig.cpp
@@ -95,8 +95,8 @@ add_library(${target} STATIC
   validators/ValidationError.h
   validators/IpAddressValidator.cpp
   validators/IpAddressValidator.h
-  widgets/ComputerSetupView.cpp
-  widgets/ComputerSetupView.h
+  widgets/ComputerLayoutView.cpp
+  widgets/ComputerLayoutView.h
   widgets/FingerprintPreview.cpp
   widgets/FingerprintPreview.h
   widgets/KeySequenceWidget.cpp
